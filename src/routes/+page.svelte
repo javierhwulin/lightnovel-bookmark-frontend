@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import BarChart from '@lucide/svelte/icons/bar-chart';
 	import Book from '@lucide/svelte/icons/book';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Filter from '@lucide/svelte/icons/filter';
 	import Heart from '@lucide/svelte/icons/heart';
 	import Image from '@lucide/svelte/icons/image';
+	import MoreHorizontal from '@lucide/svelte/icons/more-horizontal';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import Star from '@lucide/svelte/icons/star';
@@ -12,14 +15,19 @@
 	// Import stores and types
 	import { config } from '../lib/config/env.js';
 	import {
+		availableGenres,
+		currentlyReading,
+		enhancedNovels,
 		favoriteNovels,
-		filteredNovels,
-		novels,
 		novelsError,
 		novelsLoading,
 		novelsStore
 	} from '../lib/stores/novels.js';
-	import type { Novel } from '../lib/types/novel.js';
+	import {
+		USER_STATUSES,
+		userPreferencesStore,
+		type UserStatus
+	} from '../lib/stores/user-preferences.js';
 
 	// State variables
 	let activeTab = 'library';
@@ -38,9 +46,9 @@
 		description: '',
 		source_url: '',
 		cover_url: '',
-		user_status: 'Wishlist',
-		novel_status: 'Ongoing',
-		rating: 'No rating',
+		user_status: 'Wishlist' as UserStatus,
+		novel_status: 'ongoing',
+		rating: 0,
 		genres: [] as string[],
 		personal_notes: ''
 	};
@@ -49,10 +57,9 @@
 	let scrapingLoading = false;
 	let scrapingError = '';
 
-	const statusOptions = ['All Status', 'Reading', 'Completed', 'Dropped', 'Wishlist'];
-	const userStatusOptions = ['Reading', 'Completed', 'Dropped', 'Wishlist'];
-	const novelStatusOptions = ['Ongoing', 'Completed', 'Hiatus', 'Cancelled'];
-	const ratingOptions = ['No rating', '1', '2', '3', '4', '5'];
+	// Updated status options using the new user status system
+	const statusOptions = ['All Status', ...USER_STATUSES];
+	const novelStatusOptions = ['ongoing', 'completed', 'hiatus', 'dropped'];
 
 	const predefinedGenres = [
 		'Isekai',
@@ -76,58 +83,134 @@
 		'Dark'
 	];
 
-	// Reactive statements
-	$: displayedNovels = $filteredNovels(searchQuery, statusFilter, genreFilter);
-
 	// Get unique genres from all novels
-	$: allGenres = [...new Set($novels.flatMap((novel) => novel.genres))].sort();
-	$: genreOptions = ['All Genres', ...allGenres];
+	$: genreOptions = ['All Genres', ...$availableGenres.filter((g) => g !== 'All Genres')];
 
-	// Update tabs count based on current novels
-	$: tabs = [
-		{ id: 'library', label: 'Library', count: displayedNovels.length },
-		{ id: 'favorites', label: 'Favorites', count: $favoriteNovels.length },
-		{
-			id: 'wishlist',
-			label: 'Wishlist',
-			count: displayedNovels.filter((n) => n.user_status === 'Wishlist').length
-		}
-	];
-
-	// Filter novels based on active tab
+	// Filter novels based on active tab first, then apply search/status/genre filters
 	$: tabFilteredNovels = (() => {
+		let baseNovels;
+
 		switch (activeTab) {
 			case 'favorites':
-				return $favoriteNovels.filter((novel) => {
-					// Apply search and filters to favorites
-					let filtered = [novel];
-					if (searchQuery.trim()) {
-						const searchTerm = searchQuery.toLowerCase();
-						filtered = filtered.filter(
-							(n) =>
-								n.title.toLowerCase().includes(searchTerm) ||
-								n.author.toLowerCase().includes(searchTerm) ||
-								n.description.toLowerCase().includes(searchTerm)
-						);
-					}
-					if (statusFilter !== 'All Status') {
-						filtered = filtered.filter((n) => n.user_status === statusFilter);
-					}
-					if (genreFilter !== 'All Genres') {
-						filtered = filtered.filter((n) => n.genres.includes(genreFilter));
-					}
-					return filtered.length > 0;
-				});
-			case 'wishlist':
-				return displayedNovels.filter((n) => n.user_status === 'Wishlist');
+				baseNovels = $favoriteNovels;
+				break;
+			case 'reading':
+				baseNovels = $currentlyReading;
+				break;
 			default:
-				return displayedNovels;
+				baseNovels = $enhancedNovels;
 		}
+
+		// Apply all filters consistently across tabs
+		let filtered = baseNovels;
+
+		// Apply search filter
+		if (searchQuery.trim()) {
+			const searchTerm = searchQuery.toLowerCase();
+			filtered = filtered.filter(
+				(novel) =>
+					novel.title.toLowerCase().includes(searchTerm) ||
+					novel.author.toLowerCase().includes(searchTerm) ||
+					novel.description.toLowerCase().includes(searchTerm)
+			);
+		}
+
+		// Apply status filter
+		if (statusFilter !== 'All Status') {
+			filtered = filtered.filter((novel) => novel.userStatus === statusFilter);
+		}
+
+		// Apply genre filter
+		if (genreFilter !== 'All Genres') {
+			filtered = filtered.filter((novel) => novel.genres.includes(genreFilter));
+		}
+
+		return filtered;
 	})();
+
+	// Update tabs count based on filtered results for each tab
+	$: tabs = [
+		{
+			id: 'library',
+			label: 'Library',
+			count: (() => {
+				if (activeTab === 'library') return tabFilteredNovels.length;
+				// Calculate count for library tab with current filters
+				let novels = $enhancedNovels;
+				if (searchQuery.trim()) {
+					const searchTerm = searchQuery.toLowerCase();
+					novels = novels.filter(
+						(n) =>
+							n.title.toLowerCase().includes(searchTerm) ||
+							n.author.toLowerCase().includes(searchTerm) ||
+							n.description.toLowerCase().includes(searchTerm)
+					);
+				}
+				if (statusFilter !== 'All Status') {
+					novels = novels.filter((n) => n.userStatus === statusFilter);
+				}
+				if (genreFilter !== 'All Genres') {
+					novels = novels.filter((n) => n.genres.includes(genreFilter));
+				}
+				return novels.length;
+			})()
+		},
+		{
+			id: 'favorites',
+			label: 'Favorites',
+			count: (() => {
+				if (activeTab === 'favorites') return tabFilteredNovels.length;
+				// Calculate count for favorites tab with current filters
+				let novels = $favoriteNovels;
+				if (searchQuery.trim()) {
+					const searchTerm = searchQuery.toLowerCase();
+					novels = novels.filter(
+						(n) =>
+							n.title.toLowerCase().includes(searchTerm) ||
+							n.author.toLowerCase().includes(searchTerm) ||
+							n.description.toLowerCase().includes(searchTerm)
+					);
+				}
+				if (statusFilter !== 'All Status') {
+					novels = novels.filter((n) => n.userStatus === statusFilter);
+				}
+				if (genreFilter !== 'All Genres') {
+					novels = novels.filter((n) => n.genres.includes(genreFilter));
+				}
+				return novels.length;
+			})()
+		},
+		{
+			id: 'reading',
+			label: 'Reading',
+			count: (() => {
+				if (activeTab === 'reading') return tabFilteredNovels.length;
+				// Calculate count for reading tab with current filters
+				let novels = $currentlyReading;
+				if (searchQuery.trim()) {
+					const searchTerm = searchQuery.toLowerCase();
+					novels = novels.filter(
+						(n) =>
+							n.title.toLowerCase().includes(searchTerm) ||
+							n.author.toLowerCase().includes(searchTerm) ||
+							n.description.toLowerCase().includes(searchTerm)
+					);
+				}
+				if (statusFilter !== 'All Status') {
+					novels = novels.filter((n) => n.userStatus === statusFilter);
+				}
+				if (genreFilter !== 'All Genres') {
+					novels = novels.filter((n) => n.genres.includes(genreFilter));
+				}
+				return novels.length;
+			})()
+		}
+	];
 
 	// Load novels on component mount
 	onMount(async () => {
 		try {
+			// Load novels and user preferences
 			await novelsStore.loadNovels();
 		} catch (error) {
 			console.error('Failed to load novels:', error);
@@ -135,15 +218,7 @@
 	});
 
 	function toggleFavorite(novelId: number) {
-		novelsStore.toggleFavorite(novelId);
-	}
-
-	function formatProgress(novel: Novel): string {
-		if (novel.content_type === 'volumes') {
-			return `Vol ${novel.current_chapter || '?'}, Ch ?`;
-		} else {
-			return `Vol ?, Ch ${novel.current_chapter || '?'}`;
-		}
+		userPreferencesStore.toggleFavorite(novelId);
 	}
 
 	// Close dropdowns when clicking outside
@@ -163,9 +238,9 @@
 			description: '',
 			source_url: '',
 			cover_url: '',
-			user_status: 'Wishlist',
-			novel_status: 'Ongoing',
-			rating: 'No rating',
+			user_status: 'Wishlist' as UserStatus,
+			novel_status: 'ongoing',
+			rating: 0,
 			genres: [],
 			personal_notes: ''
 		};
@@ -232,25 +307,35 @@
 		}
 
 		try {
-			// Create new novel object
+			// Create new novel object (backend fields only)
 			const novelData = {
 				title: modalForm.title.trim(),
 				author: modalForm.author.trim(),
 				description: modalForm.description.trim(),
 				status: modalForm.novel_status.toLowerCase(),
 				genres: modalForm.genres,
-				cover_url: modalForm.cover_url.trim(),
-				source_url: modalForm.source_url.trim(),
+				cover_url: modalForm.cover_url.trim() || null,
+				source_url: modalForm.source_url.trim() || null,
 				total_chapters: 0,
 				total_volumes: 0,
 				content_type: 'chapters',
-				raw_status: 'Unknown',
-				rating: modalForm.rating === 'No rating' ? undefined : parseInt(modalForm.rating),
-				user_status: modalForm.user_status,
-				personal_notes: modalForm.personal_notes.trim()
+				raw_status: 'Unknown'
 			};
 
-			await novelsStore.createNovel(novelData);
+			// Create the novel in the backend
+			const createdNovel = await novelsStore.createNovel(novelData);
+
+			// Set user preferences separately
+			if (modalForm.user_status) {
+				userPreferencesStore.setUserStatus(createdNovel.id, modalForm.user_status);
+			}
+			if (modalForm.rating > 0) {
+				userPreferencesStore.setRating(createdNovel.id, modalForm.rating);
+			}
+			if (modalForm.personal_notes.trim()) {
+				userPreferencesStore.setPersonalNotes(createdNovel.id, modalForm.personal_notes.trim());
+			}
+
 			closeAddModal();
 		} catch (error) {
 			alert(error instanceof Error ? error.message : 'Failed to create novel');
@@ -275,6 +360,12 @@
 	$: if ($novelsError) {
 		console.error('Novels error:', $novelsError);
 	}
+
+	// Handle user preferences errors
+	$: userPrefsState = $userPreferencesStore;
+	$: if (userPrefsState.error) {
+		console.error('User preferences error:', userPrefsState.error);
+	}
 </script>
 
 <svelte:window on:click={closeDropdowns} />
@@ -288,20 +379,29 @@
 					<h1 class="text-3xl font-bold text-gray-900">{config.APP_TITLE}</h1>
 					<p class="mt-1 text-gray-600">{config.APP_DESCRIPTION}</p>
 				</div>
-				<button
-					class="inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
-					on:click={openAddModal}
-					disabled={$novelsLoading}
-				>
-					<Plus class="mr-2 h-4 w-4" />
-					Add Novel
-				</button>
+				<div class="flex items-center space-x-3">
+					<a
+						href="/stats"
+						class="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 transition-colors hover:bg-gray-50"
+					>
+						<BarChart class="mr-2 h-4 w-4" />
+						Statistics
+					</a>
+					<button
+						class="inline-flex items-center rounded-lg bg-gray-900 px-4 py-2 text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
+						on:click={openAddModal}
+						disabled={$novelsLoading}
+					>
+						<Plus class="mr-2 h-4 w-4" />
+						Add Novel
+					</button>
+				</div>
 			</div>
 		</div>
 	</header>
 
 	<div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-		<!-- Error Message -->
+		<!-- Error Messages -->
 		{#if $novelsError}
 			<div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-4">
 				<div class="flex items-center">
@@ -323,11 +423,40 @@
 			</div>
 		{/if}
 
+		{#if userPrefsState.error}
+			<div class="mb-4 rounded-lg border border-red-200 bg-red-50 p-4">
+				<div class="flex items-center">
+					<div class="flex-shrink-0">
+						<X class="h-5 w-5 text-red-400" />
+					</div>
+					<div class="ml-3">
+						<p class="text-sm text-red-600">User preferences error: {userPrefsState.error}</p>
+					</div>
+					<div class="ml-auto pl-3">
+						<button
+							class="inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100"
+							on:click={() => userPreferencesStore.clearError()}
+						>
+							<X class="h-4 w-4" />
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
+
 		<!-- Loading State -->
-		{#if $novelsLoading}
+		{#if $novelsLoading || userPrefsState.loading}
 			<div class="flex items-center justify-center py-12">
 				<div class="h-12 w-12 animate-spin rounded-full border-b-2 border-gray-900"></div>
-				<span class="ml-3 text-gray-600">Loading novels...</span>
+				<span class="ml-3 text-gray-600">
+					{#if $novelsLoading}
+						Loading novels...
+					{:else if userPrefsState.loading}
+						Loading user preferences...
+					{:else}
+						Loading...
+					{/if}
+				</span>
 			</div>
 		{:else}
 			<!-- Navigation Tabs -->
@@ -452,7 +581,11 @@
 				<div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
 					{#each tabFilteredNovels as novel (novel.id)}
 						<div
-							class="overflow-hidden rounded-lg border border-gray-200 bg-white transition-shadow hover:shadow-lg"
+							class="cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white transition-shadow hover:shadow-lg"
+							on:click={() => goto(`/novels/${novel.id}`)}
+							role="button"
+							tabindex="0"
+							on:keydown={(e) => e.key === 'Enter' && goto(`/novels/${novel.id}`)}
 						>
 							<!-- Image placeholder -->
 							<div class="relative flex aspect-[3/4] items-center justify-center bg-gray-200">
@@ -463,7 +596,7 @@
 								{/if}
 								<button
 									class="absolute top-3 right-3 rounded-full bg-white/80 p-2 transition-colors hover:bg-white"
-									on:click={() => toggleFavorite(novel.id)}
+									on:click|stopPropagation={() => toggleFavorite(novel.id)}
 								>
 									<Heart
 										class="h-4 w-4 {novel.isFavorite
@@ -478,48 +611,71 @@
 								<h3 class="mb-1 line-clamp-2 text-lg font-semibold text-gray-900">
 									{novel.title}
 								</h3>
-								<p class="mb-2 text-sm text-gray-600">{novel.author}</p>
+								<p class="mb-3 text-sm text-gray-600">{novel.author}</p>
 
-								<!-- Genres -->
-								<div class="mb-3 flex flex-wrap gap-1">
-									{#each novel.genres.slice(0, 3) as genre (genre)}
-										<span class="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700">
-											{genre}
-										</span>
-									{/each}
-									{#if novel.genres.length > 3}
-										<span class="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700">
-											+{novel.genres.length - 3}
-										</span>
-									{/if}
-								</div>
-
-								<!-- Progress and Rating -->
-								<div class="flex items-center justify-between">
-									<div class="flex items-center text-sm text-gray-500">
-										<Book class="mr-1 h-4 w-4" />
-										<span>{formatProgress(novel)}</span>
+								<!-- Key Info Row -->
+								<div class="mb-3 flex items-center justify-between">
+									<!-- Genres -->
+									<div class="flex flex-wrap items-center gap-1">
+										{#if novel.genres.length > 0}
+											{#each novel.genres.slice(0, 3) as genre (genre)}
+												<span class="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-700">
+													{genre}
+												</span>
+											{/each}
+											{#if novel.genres.length > 3}
+												<div
+													class="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100"
+												>
+													<MoreHorizontal class="h-3 w-3 text-gray-500" />
+												</div>
+											{/if}
+										{/if}
 									</div>
+
+									<!-- Simple Rating Display -->
 									{#if novel.rating}
 										<div class="flex items-center">
-											<Star class="h-4 w-4 fill-current text-yellow-400" />
-											<span class="ml-1 text-sm font-medium text-gray-900">{novel.rating}</span>
+											<Star class="h-3 w-3 fill-current text-yellow-400" />
+											<span class="ml-1 text-xs text-gray-600">{novel.rating}</span>
 										</div>
 									{/if}
 								</div>
 
-								<!-- Status -->
-								<div class="mt-2">
-									<span
-										class="inline-flex rounded-full px-2 py-1 text-xs font-medium {novel.status ===
-										'completed'
-											? 'bg-green-100 text-green-800'
-											: novel.status === 'ongoing'
-												? 'bg-blue-100 text-blue-800'
-												: 'bg-gray-100 text-gray-800'}"
-									>
-										{novel.status.charAt(0).toUpperCase() + novel.status.slice(1)}
-									</span>
+								<!-- Status and Progress -->
+								<div class="space-y-2">
+									<!-- User Status -->
+									{#if novel.userStatus}
+										<div class="flex items-center justify-between">
+											<span class="text-xs text-gray-500">Status:</span>
+											<span class="rounded bg-purple-100 px-2 py-1 text-xs text-purple-800">
+												{novel.userStatus}
+											</span>
+										</div>
+									{/if}
+
+									<!-- Reading Progress -->
+									{#if novel.userStatus === 'Reading' && (novel.currentChapter || novel.total_chapters)}
+										<div class="flex items-center justify-between">
+											<span class="text-xs text-gray-500">Progress:</span>
+											<span class="text-xs text-gray-700">
+												{novel.currentChapter || 0}/{novel.total_chapters} chapters
+											</span>
+										</div>
+
+										<!-- Progress Bar -->
+										{#if novel.total_chapters > 0}
+											<div class="h-1 w-full rounded-full bg-gray-200">
+												<div
+													class="h-1 rounded-full bg-blue-600 transition-all duration-300"
+													style="width: {Math.min(
+														100,
+														Math.round(((novel.currentChapter || 0) / novel.total_chapters) * 100)
+													)}%"
+												></div>
+											</div>
+										{/if}
+									{/if}
 								</div>
 							</div>
 						</div>
@@ -646,7 +802,7 @@
 								bind:value={modalForm.user_status}
 								class="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-transparent focus:ring-2 focus:ring-gray-900"
 							>
-								{#each userStatusOptions as status (status)}
+								{#each USER_STATUSES as status (status)}
 									<option value={status}>{status}</option>
 								{/each}
 							</select>
@@ -668,9 +824,12 @@
 								bind:value={modalForm.rating}
 								class="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-transparent focus:ring-2 focus:ring-gray-900"
 							>
-								{#each ratingOptions as rating (rating)}
-									<option value={rating}>{rating}</option>
-								{/each}
+								<option value={0}>No rating</option>
+								<option value={1}>⭐ (1 star)</option>
+								<option value={2}>⭐⭐ (2 stars)</option>
+								<option value={3}>⭐⭐⭐ (3 stars)</option>
+								<option value={4}>⭐⭐⭐⭐ (4 stars)</option>
+								<option value={5}>⭐⭐⭐⭐⭐ (5 stars)</option>
 							</select>
 						</div>
 					</div>

@@ -1,20 +1,83 @@
-// place files you want to import through the `$lib` alias in this directory.
+// Re-export your most used types and utilities.
 
-// Export stores
-export {
-    favoriteNovels,
-    filteredNovels, novels, novelsByGenre, novelsByStatus, novelsError, novelsLoading, novelsStore, searchNovels
-} from './stores/novels.js';
-
-// Export types
-export type {
-    ApiError, Chapter,
-    CreateNovelRequest, Novel, ScrapingRequest,
-    ScrapingResponse, UpdateNovelRequest
-} from './types/novel.js';
-
-// Export API client
+// API
 export { api } from './api/novels.js';
 
-// Export config
-export { config } from './config/env.js';
+// Configuration
+export { config, validateConfig } from './config/env.js';
+
+// Types
+export type {
+    ApiError,
+    ApiInfoResponse,
+    BackgroundImportResponse,
+    Chapter,
+    CreateChapterRequest,
+    CreateNovelRequest,
+    CreateReadingSessionRequest,
+    CreateUserPreferenceRequest,
+    EnhancedNovel,
+    HealthResponse,
+    Novel,
+    NovelReadingStatistics,
+    ReadingSession,
+    ReadingStatistics,
+    ScrapingRequest,
+    ScrapingResponse,
+    UpdateChapterRequest,
+    UpdateNovelRequest,
+    UpdateReadingSessionRequest,
+    UpdateUserPreferenceRequest,
+    UserPreference
+} from './types/novel.js';
+
+// Novel stores
+export {
+    availableGenres,
+    currentlyReading,
+    enhancedNovels,
+    favoriteNovels,
+    filteredNovels,
+    novelsError,
+    novelsLoading,
+    novelsStore
+} from './stores/novels.js';
+
+// Chapter stores
+export {
+    chapterByNumber,
+    chapters,
+    chaptersCount,
+    chaptersError,
+    chaptersLoading,
+    chaptersStore,
+    currentNovelId,
+    latestChapter
+} from './stores/chapters.js';
+
+// User preferences
+export {
+    availableUserStatuses,
+    favoriteNovelIds,
+    getUserNovelData,
+    getUserNovelDataDerived,
+    novelsByUserStatus,
+    readingStats,
+    USER_STATUSES,
+    userNovelsData,
+    userPreferencesStore,
+    type UserStatus
+} from './stores/user-preferences.js';
+
+// Reading sessions
+export {
+    activeSessions,
+    calculateReadingStreak,
+    formatSessionDuration,
+    readingSessionsStore,
+    readingStatistics,
+    recentSessions
+} from './stores/reading-sessions.js';
+
+// Utilities
+export { cn } from './utils.js';
